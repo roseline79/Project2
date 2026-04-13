@@ -2128,7 +2128,7 @@ def run_bart():
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics if training_args.predict_with_generate else None,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=20)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=5)]
     )
 
     # Training

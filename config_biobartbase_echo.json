@@ -1,5 +1,5 @@
 {
-  "output_dir": "./biobartbase_echo_11042026/",
+  "output_dir": "./biobartbase_echo_learningattention/",
   "dataset_name": "./dataset/ECHO_split.json",
   "overwrite_output_dir": true,
   "model_name_or_path": "/home/pogna/rmr451/biobart-base",
@@ -11,7 +11,7 @@
 
   "bf16": true,
   "seed": 42,
-  "num_train_epochs": 5,
+  "num_train_epochs": 8,
 
   "per_device_train_batch_size": 4,
   "per_device_eval_batch_size": 2,
@@ -39,6 +39,11 @@
 
   "logging_steps": 100,
   "preprocessing_num_workers": 4,
-  "source_prefix": "summarize: "
+  "source_prefix": "summarize: ",
+
+  "cross_attention_use_policy": true,
+  "cross_attention_policy_hidden_dim": null,
+  "cross_attention_policy_init_scale": 0.1,
+  "cross_attention_policy_clip_beta": 1.0
 }
     
