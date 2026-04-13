@@ -264,6 +264,10 @@ class BartAttention(nn.Module):
         dropout: float = 0.0,
         is_decoder: bool = False,
         bias: bool = True,
+        use_learned_policy: bool = False,
+        policy_hidden_dim: Optional[int] = None,
+        policy_init_scale: float = 0.1,
+        policy_clip_beta: float = 1.0,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -283,6 +287,22 @@ class BartAttention(nn.Module):
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+
+        self.use_learned_policy = use_learned_policy
+        self.policy_clip_beta = policy_clip_beta
+
+        if self.use_learned_policy:
+            if policy_hidden_dim is None:
+                policy_hidden_dim = self.head_dim
+
+            self.policy_mlp = nn.Sequential(
+                nn.Linear(self.head_dim, policy_hidden_dim, bias=True),
+                nn.Tanh(),
+                nn.Linear(policy_hidden_dim, self.head_dim, bias=True),
+            )
+
+            # learned scalar to control policy strength
+            self.policy_gate = nn.Parameter(torch.tensor(policy_init_scale, dtype=torch.float))
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -345,7 +365,23 @@ class BartAttention(nn.Module):
         value_states = value_states.view(*proj_shape)
 
         src_len = key_states.size(1)
+
+        # standard attention logits
         attn_weights = torch.bmm(query_states, key_states.transpose(1, 2))
+
+        # learned latent policy for cross-attention only
+        if self.use_learned_policy and is_cross_attention:
+            # query_states: [bsz*num_heads, tgt_len, head_dim]
+            # key_states:   [bsz*num_heads, src_len, head_dim]
+            policy_query = self.policy_mlp(query_states)
+            policy_bias = torch.bmm(policy_query, key_states.transpose(1, 2))
+
+            # stabilize the learned bias
+            policy_bias = torch.tanh(policy_bias)
+            policy_bias = torch.clamp(policy_bias, -self.policy_clip_beta, self.policy_clip_beta)
+
+            # add learned bias into logits
+            attn_weights = attn_weights + self.policy_gate * policy_bias
 
         if attn_weights.size() != (bsz * self.num_heads, tgt_len, src_len):
             raise ValueError(
@@ -511,6 +547,10 @@ class BartDecoderLayer(nn.Module):
             config.decoder_attention_heads,
             dropout=config.attention_dropout,
             is_decoder=True,
+            use_learned_policy=True,
+            policy_hidden_dim=self.embed_dim // config.decoder_attention_heads,
+            policy_init_scale=0.1,
+            policy_clip_beta=1.0,
         )
         self.encoder_attn_layer_norm = nn.LayerNorm(self.embed_dim)
         self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
