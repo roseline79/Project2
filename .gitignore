@@ -1,0 +1,16 @@
+# Data and large files
+data/
+outputs/
+runs/
+
+# Model checkpoints
+*.pt
+*.bin
+*.ckpt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs
+*.log
