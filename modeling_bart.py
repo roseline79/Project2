@@ -290,20 +290,19 @@ class BartAttention(nn.Module):
 
         self.use_learned_policy = use_learned_policy
         self.policy_clip_beta = policy_clip_beta
-        self.policy_gate = nn.Parameter(torch.tensor(policy_init_scale))
-        self.policy_mlp = None
+
         if self.use_learned_policy:
-            hidden_dim = policy_hidden_dim if policy_hidden_dim is not None else self.head_dim
+            if policy_hidden_dim is None:
+                policy_hidden_dim = self.head_dim
+
             self.policy_mlp = nn.Sequential(
-                nn.Linear(self.head_dim, hidden_dim, bias=bias),
-                nn.GELU(),
-                nn.Linear(hidden_dim, self.head_dim, bias=bias),
+                nn.Linear(self.head_dim, policy_hidden_dim, bias=True),
+                nn.Tanh(),
+                nn.Linear(policy_hidden_dim, self.head_dim, bias=True),
             )
-            for module in self.policy_mlp:
-                if isinstance(module, nn.Linear):
-                    module.weight.data.mul_(policy_init_scale)
-                    if module.bias is not None:
-                        module.bias.data.zero_()
+
+            # learned scalar to control policy strength
+            self.policy_gate = nn.Parameter(torch.tensor(policy_init_scale, dtype=torch.float))
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -374,9 +373,8 @@ class BartAttention(nn.Module):
         if self.use_learned_policy and is_cross_attention:
             # query_states: [bsz*num_heads, tgt_len, head_dim]
             # key_states:   [bsz*num_heads, src_len, head_dim]
-
-            policy_query = self.policy_mlp(query_states)  # [bsz*num_heads, tgt_len, head_dim]
-            policy_bias = torch.bmm(policy_query, key_states.transpose(1, 2))  # [bsz*num_heads, tgt_len, src_len]
+            policy_query = self.policy_mlp(query_states)
+            policy_bias = torch.bmm(policy_query, key_states.transpose(1, 2))
 
             # stabilize the learned bias
             policy_bias = torch.tanh(policy_bias)
